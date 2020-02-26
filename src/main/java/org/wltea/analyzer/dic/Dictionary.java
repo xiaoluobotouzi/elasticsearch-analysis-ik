@@ -25,38 +25,42 @@
  */
 package org.wltea.analyzer.dic;
 
-import java.io.BufferedReader;
-import java.io.FileInputStream;
-import java.io.FileNotFoundException;
-import java.io.IOException;
-import java.io.InputStream;
-import java.io.InputStreamReader;
-import java.nio.file.attribute.BasicFileAttributes;
-import java.nio.file.Files;
-import java.nio.file.FileVisitResult;
-import java.nio.file.Path;
-import java.nio.file.SimpleFileVisitor;
-import java.security.AccessController;
-import java.security.PrivilegedAction;
-import java.util.*;
-import java.util.concurrent.Executors;
-import java.util.concurrent.ScheduledExecutorService;
-import java.util.concurrent.TimeUnit;
-
+import com.alibaba.druid.pool.DruidDataSource;
+import com.alibaba.druid.pool.DruidPooledConnection;
 import org.apache.http.Header;
 import org.apache.http.HttpEntity;
-import org.apache.http.client.ClientProtocolException;
 import org.apache.http.client.config.RequestConfig;
 import org.apache.http.client.methods.CloseableHttpResponse;
 import org.apache.http.client.methods.HttpGet;
 import org.apache.http.impl.client.CloseableHttpClient;
 import org.apache.http.impl.client.HttpClients;
+import org.apache.logging.log4j.Logger;
 import org.elasticsearch.SpecialPermission;
 import org.elasticsearch.common.io.PathUtils;
 import org.elasticsearch.plugin.analysis.ik.AnalysisIkPlugin;
 import org.wltea.analyzer.cfg.Configuration;
-import org.apache.logging.log4j.Logger;
+import org.wltea.analyzer.ext.DBConnUtils;
+import org.wltea.analyzer.ext.MonitorMysql;
 import org.wltea.analyzer.help.ESPluginLoggerFactory;
+
+import java.io.*;
+import java.nio.file.FileVisitResult;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.SimpleFileVisitor;
+import java.nio.file.attribute.BasicFileAttributes;
+import java.security.AccessController;
+import java.security.PrivilegedAction;
+import java.sql.PreparedStatement;
+import java.sql.ResultSet;
+import java.sql.SQLException;
+import java.util.ArrayList;
+import java.util.Collection;
+import java.util.List;
+import java.util.Properties;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.TimeUnit;
 
 
 /**
@@ -164,6 +168,11 @@ public class Dictionary {
 						for (String location : singleton.getRemoteExtStopWordDictionarys()) {
 							pool.scheduleAtFixedRate(new Monitor(location), 10, 60, TimeUnit.SECONDS);
 						}
+					}
+
+					if(cfg.isEnableRemoteDictByMysql()){
+						// 10 秒是初始延迟可以修改的 60是间隔时间 单位秒
+						pool.scheduleAtFixedRate(new MonitorMysql(), 10, 60, TimeUnit.SECONDS);
 					}
 
 				}
@@ -391,6 +400,8 @@ public class Dictionary {
 		this.loadExtDict();
 		// 加载远程自定义词库
 		this.loadRemoteExtDict();
+		// 加载远程数据库自定义词库
+		this.reLoadHotDictByMysql(0);
 	}
 
 	/**
@@ -571,6 +582,50 @@ public class Dictionary {
 		_MainDict = tmpDict._MainDict;
 		_StopWords = tmpDict._StopWords;
 		logger.info("重新加载词典完毕...");
+	}
+
+	/**
+	 * 查询数据库词典 指定版本，加载到词库
+	 * TODO: 2020/2/26 注意编码格式 强烈要求 UTF-8
+	 * @param version
+	 */
+	public void reLoadHotDictByMysql(int version) {
+		long start = System.currentTimeMillis();
+		logger.info("[>>>>>>>>>>] 药渡 不重新加载全部词典，只做增量词典 Start...");
+
+		// 获取数据库连接
+		DruidPooledConnection druidDataSourceConnection =
+				DBConnUtils.getDruidDataSourceConnection(new DruidDataSource());
+
+		// 连接有效
+		if(null != druidDataSourceConnection){
+			// 根据版本查询扩展词典
+			String selectVersionSql = "SELECT EXT_WORD WORD FROM ES_IK_EXT_WORD T WHERE T.VERSION >= " + version;
+			try {
+				PreparedStatement preparedStatement = druidDataSourceConnection.prepareStatement(selectVersionSql);
+				ResultSet resultSet = preparedStatement.executeQuery();
+				List<String> words = new ArrayList<>();
+				while (resultSet.next()){
+					String word = resultSet.getString("WORD");
+					words.add(word.trim());
+				}
+				// 遍历扩展词，新增到指定词典域
+				for (String word : words) {
+					if (word != null && !"".equals(word.trim())) {
+						// 加载扩展词典数据到主内存词典中
+						logger.info("[>>>>>>>>>>] 药渡 EXT_WORD：" + word);
+						_MainDict.fillSegment(word.trim().toLowerCase().toCharArray());
+					}
+				}
+			} catch (SQLException e) {
+				logger.error("[>>>>>>>>>>] 药渡 reLoad Hot Dict By Mysql Error ", e);
+			}
+		}
+
+		// 释放连接
+		DBConnUtils.closeConnection(druidDataSourceConnection);
+
+		logger.info("[>>>>>>>>>>] 药渡 不重新加载全部词典，只做增量词典 End... 耗时：" + (System.currentTimeMillis()-start) + " ms");
 	}
 
 }
