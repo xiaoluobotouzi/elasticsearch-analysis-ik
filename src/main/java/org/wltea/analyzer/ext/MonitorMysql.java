@@ -73,10 +73,12 @@ public class MonitorMysql implements Runnable {
                 }
             } catch (SQLException e) {
                 logger.error("[>>>>>>>>>>] 药渡 reLoad Hot Dict Error ", e);
+            } finally {
+                // 释放连接
+                singleton.closeConnection(DBConnection);
             }
         }
 
-        // 释放连接
-        singleton.closeConnection(DBConnection);
+
     }
 }

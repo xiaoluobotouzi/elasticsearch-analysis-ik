@@ -131,7 +131,7 @@ public class Dictionary {
 		}
 
 		try {
-			Path file = PathUtils.get(getDictRoot(), "config/jdbc-reload.properties");
+			Path file = PathUtils.get(getDictRoot(), "jdbc-reload.properties");
 			Properties propsDB = new Properties();
 			propsDB.load(new FileInputStream(file.toFile()));
 			if(null != propsDB){
@@ -633,11 +633,11 @@ public class Dictionary {
 				}
 			} catch (SQLException e) {
 				logger.error("[>>>>>>>>>>] 药渡 reLoad Hot Dict By Mysql Error ", e);
+			} finally {
+				// 释放连接
+				closeConnection(DBConnection);
 			}
 		}
-
-		// 释放连接
-		closeConnection(DBConnection);
 
 		logger.info("[>>>>>>>>>>] 药渡 not all dict, only increment. End... 耗时：" + (System.currentTimeMillis()-start) + " ms");
 	}
@@ -651,7 +651,7 @@ public class Dictionary {
 	private static Integer minIdle = 2;
 	private static Integer maxWait = 60000;
 	private static Integer timeBetweenEvictionRunsMillis = 60000;
-	private static Integer minEvictableIdleTimeMillis = 300000;
+	private static Integer minEvictableIdleTimeMillis = 60000;
 
 	/**
 	 * 获取数据库连接 JDBC
