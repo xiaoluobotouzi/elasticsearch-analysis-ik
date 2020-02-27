@@ -39,7 +39,6 @@ import org.elasticsearch.SpecialPermission;
 import org.elasticsearch.common.io.PathUtils;
 import org.elasticsearch.plugin.analysis.ik.AnalysisIkPlugin;
 import org.wltea.analyzer.cfg.Configuration;
-import org.wltea.analyzer.ext.DBConnUtils;
 import org.wltea.analyzer.ext.MonitorMysql;
 import org.wltea.analyzer.help.ESPluginLoggerFactory;
 
@@ -51,6 +50,7 @@ import java.nio.file.SimpleFileVisitor;
 import java.nio.file.attribute.BasicFileAttributes;
 import java.security.AccessController;
 import java.security.PrivilegedAction;
+import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
@@ -103,10 +103,12 @@ public class Dictionary {
 
 	private Path conf_dir;
 	private Properties props;
+	private Properties propsDB;
 
 	private Dictionary(Configuration cfg) {
 		this.configuration = cfg;
 		this.props = new Properties();
+		this.propsDB = new Properties();
 		this.conf_dir = cfg.getEnvironment().configFile().resolve(AnalysisIkPlugin.PLUGIN_NAME);
 		Path configFile = conf_dir.resolve(FILE_NAME);
 
@@ -131,6 +133,19 @@ public class Dictionary {
 			} catch (IOException e) {
 				logger.error("ik-analyzer", e);
 			}
+		}
+
+		try {
+			Path file = PathUtils.get(getDictRoot(),"jdbc-reload.properties");
+			propsDB.load(new FileInputStream(file.toFile()));
+			if(null != propsDB){
+				driver = propsDB.getProperty("driver");
+				url = propsDB.getProperty("url");
+				username = propsDB.getProperty("username");
+				password = propsDB.getProperty("password");
+			}
+		} catch (IOException e) {
+			logger.error("[>>>>>>>>>>] 药渡 read properties fail", e);
 		}
 	}
 
@@ -170,7 +185,8 @@ public class Dictionary {
 						}
 					}
 
-					if(cfg.isEnableRemoteDictByMysql()){
+//					if(cfg.isEnableRemoteDictByMysql()){
+					if(true){
 						// 10 秒是初始延迟可以修改的 60是间隔时间 单位秒
 						pool.scheduleAtFixedRate(new MonitorMysql(), 10, 60, TimeUnit.SECONDS);
 					}
@@ -585,17 +601,17 @@ public class Dictionary {
 	}
 
 	/**
+	 * ============================================================================================
 	 * 查询数据库词典 指定版本，加载到词库
 	 * TODO: 2020/2/26 注意编码格式 强烈要求 UTF-8
 	 * @param version
 	 */
 	public void reLoadHotDictByMysql(int version) {
 		long start = System.currentTimeMillis();
-		logger.info("[>>>>>>>>>>] 药渡 不重新加载全部词典，只做增量词典 Start...");
+		logger.info("[>>>>>>>>>>] 药渡 not all dict, only increment  Start...");
 
 		// 获取数据库连接
-		DruidPooledConnection druidDataSourceConnection =
-				DBConnUtils.getDruidDataSourceConnection(new DruidDataSource());
+		DruidPooledConnection druidDataSourceConnection = getDruidDataSourceConnection(new DruidDataSource());
 
 		// 连接有效
 		if(null != druidDataSourceConnection){
@@ -623,9 +639,63 @@ public class Dictionary {
 		}
 
 		// 释放连接
-		DBConnUtils.closeConnection(druidDataSourceConnection);
+		closeConnection(druidDataSourceConnection);
 
-		logger.info("[>>>>>>>>>>] 药渡 不重新加载全部词典，只做增量词典 End... 耗时：" + (System.currentTimeMillis()-start) + " ms");
+		logger.info("[>>>>>>>>>>] 药渡 not all dict, only increment. End... 耗时：" + (System.currentTimeMillis()-start) + " ms");
+	}
+
+	private static String driver = null;
+	private static String url = null;
+	private static String username = null;
+	private static String password = null;
+	private static Integer initialSize = 2;
+	private static Integer maxActive = 50;
+	private static Integer minIdle = 2;
+	private static Integer maxWait = 60000;
+	private static Integer timeBetweenEvictionRunsMillis = 60000;
+	private static Integer minEvictableIdleTimeMillis = 300000;
+
+	/**
+	 * druid 连接池 获取数据库连接
+	 * @param druidDataSource
+	 * @return
+	 */
+	public DruidPooledConnection getDruidDataSourceConnection(DruidDataSource druidDataSource){
+		DruidPooledConnection connection = null;
+		if(null == driver){
+			throw new IllegalStateException("[>>>>>>>>>>] 药渡 db driver is not null");
+		}
+		druidDataSource.setDriverClassName(driver);
+		druidDataSource.setUrl(url);
+		druidDataSource.setUsername(username);
+		druidDataSource.setPassword(password);
+		druidDataSource.setInitialSize(initialSize);
+		druidDataSource.setMaxActive(maxActive);
+		druidDataSource.setMinIdle(minIdle);
+		druidDataSource.setMaxWait(maxWait);
+		druidDataSource.setTimeBetweenEvictionRunsMillis(timeBetweenEvictionRunsMillis);
+		druidDataSource.setMinEvictableIdleTimeMillis(minEvictableIdleTimeMillis);
+		druidDataSource.setValidationQuery("SELECT 1 FROM DUAL");
+		try {
+			connection = druidDataSource.getConnection();
+		} catch (SQLException e) {
+			logger.error("[>>>>>>>>>] 药渡 get db connection fail", e);
+		}
+		return connection;
+	}
+
+	/**
+	 * 关闭数据库连接
+	 * @param connection
+	 */
+	public void closeConnection(Connection connection){
+		if(null != connection){
+			try {
+				connection.close();
+			} catch (SQLException e) {
+				logger.error("[>>>>>>>>>>] 药渡 close db connection fail", e);
+			}
+		}
 	}
 
 }

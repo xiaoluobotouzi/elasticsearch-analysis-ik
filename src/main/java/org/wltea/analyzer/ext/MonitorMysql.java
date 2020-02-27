@@ -22,14 +22,17 @@ public class MonitorMysql implements Runnable {
 
     private static final Logger logger = ESPluginLoggerFactory.getLogger(MonitorMysql.class.getName());
 
+    private Dictionary singleton = null;
+
     @Override
     public void run() {
-        logger.info("[>>>>>>>>>>>] reload hot dict from mysql Start...");
+        logger.info("[>>>>>>>>>>>] 药渡 reload hot dict from mysql Start...");
+        singleton = Dictionary.getSingleton();
         AccessController.doPrivileged((PrivilegedAction<Void>) () -> {
             this.runUnprivileged();
             return null;
         });
-        logger.info("[>>>>>>>>>>>] reload hot dict from mysql End...");
+        logger.info("[>>>>>>>>>>>] 药渡 reload hot dict from mysql End...");
     }
 
     private int currentVersion;
@@ -43,9 +46,13 @@ public class MonitorMysql implements Runnable {
      *  ⑤休眠1min，返回第①步
      */
     public void runUnprivileged() {
+        if(null == singleton){
+            throw new IllegalStateException("[>>>>>>>>>>] 药渡 dictionary have not init");
+        }
+
         // 获取数据库连接
         DruidPooledConnection druidDataSourceConnection =
-                DBConnUtils.getDruidDataSourceConnection(new DruidDataSource());
+                singleton.getDruidDataSourceConnection(new DruidDataSource());
 
         // 连接有效
         if(null != druidDataSourceConnection){
@@ -58,6 +65,7 @@ public class MonitorMysql implements Runnable {
                 while (resultSet.next()){
                     newVersion = resultSet.getInt("VERSION");
                 }
+                logger.info("[>>>>>>>>>>] 药渡 reLoad Hot Dict Version. mysql version " + newVersion + ", current version " + currentVersion);
                 // 数据库新版本大于当前版本，更新词库
                 if(newVersion > currentVersion){
                     // 增量词库，修改版本
@@ -70,6 +78,6 @@ public class MonitorMysql implements Runnable {
         }
 
         // 释放连接
-        DBConnUtils.closeConnection(druidDataSourceConnection);
+        singleton.closeConnection(druidDataSourceConnection);
     }
 }

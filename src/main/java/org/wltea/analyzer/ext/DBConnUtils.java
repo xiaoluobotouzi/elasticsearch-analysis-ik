@@ -27,9 +27,6 @@ public class DBConnUtils {
     private static final String username = "remote";
     private static final String password = "F2CAuq0h89spFlri";
 
-    private static DruidDataSource druidDataSource = new DruidDataSource();
-    private static MysqlDataSource mysqlDataSource = new MysqlDataSource();
-
     /**
      * MysqlDataSource 不确定是是否有集成连接池
      * @param mysqlDataSource
@@ -96,7 +93,7 @@ public class DBConnUtils {
         String sql = "select count(1) cc from ES_IK_EXT_WORD";
         try {
             // mysql-connection-java test
-            mysqlDataSourceConnection = getMysqlDataSourceConnection(mysqlDataSource);
+            mysqlDataSourceConnection = getMysqlDataSourceConnection(new MysqlDataSource());
             System.out.print("执行SQL：" + sql);
             preparedStatement = mysqlDataSourceConnection.prepareStatement(sql);
             ResultSet resultSet = preparedStatement.executeQuery();
@@ -106,7 +103,7 @@ public class DBConnUtils {
             }
 
             // druid test
-            druidDataSourceConnection = getDruidDataSourceConnection(druidDataSource);
+            druidDataSourceConnection = getDruidDataSourceConnection(new DruidDataSource());
             System.out.println("执行SQL：" + sql);
             preparedStatement1 = druidDataSourceConnection.prepareStatement(sql);
             ResultSet resultSet1 = preparedStatement1.executeQuery();

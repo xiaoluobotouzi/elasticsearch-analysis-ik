@@ -24,7 +24,7 @@ public class Configuration {
 	//是否启用远程词典加载
 	private boolean enableRemoteDict=false;
 
-	//是否启用远程词典加载By Mysql
+	//是否启用加载远程词典 By Mysql
 	private boolean enableRemoteDictByMysql=false;
 
 	//是否启用小写处理
