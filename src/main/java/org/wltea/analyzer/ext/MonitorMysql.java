@@ -3,6 +3,7 @@ package org.wltea.analyzer.ext;
 import com.alibaba.druid.pool.DruidDataSource;
 import com.alibaba.druid.pool.DruidPooledConnection;
 import org.apache.logging.log4j.Logger;
+import org.elasticsearch.SpecialPermission;
 import org.wltea.analyzer.dic.Dictionary;
 import org.wltea.analyzer.help.ESPluginLoggerFactory;
 
@@ -22,19 +23,20 @@ public class MonitorMysql implements Runnable {
 
     private static final Logger logger = ESPluginLoggerFactory.getLogger(MonitorMysql.class.getName());
 
-    private Dictionary singleton = null;
-
     @Override
     public void run() {
-        logger.info("[>>>>>>>>>>>] 药渡 reload hot dict from mysql Start...");
-        singleton = Dictionary.getSingleton();
+        logger.info("[>>>>>>>>>>>] 药渡 60s load once hot dict from mysql. Start...");
+        // java 权限安全检查
+        SpecialPermission.check();
+        // 访问控制
         AccessController.doPrivileged((PrivilegedAction<Void>) () -> {
             this.runUnprivileged();
             return null;
         });
-        logger.info("[>>>>>>>>>>>] 药渡 reload hot dict from mysql End...");
+        logger.info("[>>>>>>>>>>>] 药渡 60s load hot dict from mysql End...");
     }
 
+    // 当前词典版本
     private int currentVersion;
 
     /**
@@ -46,20 +48,17 @@ public class MonitorMysql implements Runnable {
      *  ⑤休眠1min，返回第①步
      */
     public void runUnprivileged() {
-        if(null == singleton){
-            throw new IllegalStateException("[>>>>>>>>>>] 药渡 dictionary have not init");
-        }
-
+        logger.info("[>>>>>>>>>>] 药渡 get hot dict version start");
+        Dictionary singleton = Dictionary.getSingleton();
         // 获取数据库连接
-        DruidPooledConnection druidDataSourceConnection =
-                singleton.getDruidDataSourceConnection(new DruidDataSource());
+        DruidPooledConnection DBConnection = singleton.getDruidDataSourceConnection(new DruidDataSource());
 
         // 连接有效
-        if(null != druidDataSourceConnection){
+        if(null != DBConnection){
             // 查询版本表最大的版本
-            String selectVersionSql = "SELECT MAX(VERSION) FROM ES_IK_EXT_WORD_VER";
+            String selectVersionSql = "SELECT MAX(VERSION) VERSION FROM ES_IK_EXT_WORD_VER";
             try {
-                PreparedStatement preparedStatement = druidDataSourceConnection.prepareStatement(selectVersionSql);
+                PreparedStatement preparedStatement = DBConnection.prepareStatement(selectVersionSql);
                 ResultSet resultSet = preparedStatement.executeQuery();
                 int newVersion = 0;
                 while (resultSet.next()){
@@ -78,6 +77,6 @@ public class MonitorMysql implements Runnable {
         }
 
         // 释放连接
-        singleton.closeConnection(druidDataSourceConnection);
+        singleton.closeConnection(DBConnection);
     }
 }

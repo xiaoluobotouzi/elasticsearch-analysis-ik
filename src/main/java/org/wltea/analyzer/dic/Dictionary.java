@@ -50,10 +50,7 @@ import java.nio.file.SimpleFileVisitor;
 import java.nio.file.attribute.BasicFileAttributes;
 import java.security.AccessController;
 import java.security.PrivilegedAction;
-import java.sql.Connection;
-import java.sql.PreparedStatement;
-import java.sql.ResultSet;
-import java.sql.SQLException;
+import java.sql.*;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.List;
@@ -84,7 +81,7 @@ public class Dictionary {
 	 */
 	private Configuration configuration;
 
-	private static final Logger logger = ESPluginLoggerFactory.getLogger(Monitor.class.getName());
+	private static final Logger logger = ESPluginLoggerFactory.getLogger(Dictionary.class.getName());
 
 	private static ScheduledExecutorService pool = Executors.newScheduledThreadPool(1);
 
@@ -103,12 +100,10 @@ public class Dictionary {
 
 	private Path conf_dir;
 	private Properties props;
-	private Properties propsDB;
 
 	private Dictionary(Configuration cfg) {
 		this.configuration = cfg;
 		this.props = new Properties();
-		this.propsDB = new Properties();
 		this.conf_dir = cfg.getEnvironment().configFile().resolve(AnalysisIkPlugin.PLUGIN_NAME);
 		Path configFile = conf_dir.resolve(FILE_NAME);
 
@@ -136,9 +131,11 @@ public class Dictionary {
 		}
 
 		try {
-			Path file = PathUtils.get(getDictRoot(),"jdbc-reload.properties");
+			Path file = PathUtils.get(getDictRoot(), "config/jdbc-reload.properties");
+			Properties propsDB = new Properties();
 			propsDB.load(new FileInputStream(file.toFile()));
 			if(null != propsDB){
+				logger.info("[>>>>>>>>>>] 药渡 read properties SUCCESS");
 				driver = propsDB.getProperty("driver");
 				url = propsDB.getProperty("url");
 				username = propsDB.getProperty("username");
@@ -185,9 +182,9 @@ public class Dictionary {
 						}
 					}
 
-//					if(cfg.isEnableRemoteDictByMysql()){
-					if(true){
-						// 10 秒是初始延迟可以修改的 60是间隔时间 单位秒
+					if(cfg.isEnableRemoteDictByMysql()){
+						logger.info("[>>>>>>>>>>] 药渡 new MonitorMysql");
+						// 初始延迟10秒, 间隔60秒执行一次
 						pool.scheduleAtFixedRate(new MonitorMysql(), 10, 60, TimeUnit.SECONDS);
 					}
 
@@ -417,7 +414,7 @@ public class Dictionary {
 		// 加载远程自定义词库
 		this.loadRemoteExtDict();
 		// 加载远程数据库自定义词库
-		this.reLoadHotDictByMysql(0);
+		this.reLoadHotDictByMysql(-1);
 	}
 
 	/**
@@ -608,17 +605,18 @@ public class Dictionary {
 	 */
 	public void reLoadHotDictByMysql(int version) {
 		long start = System.currentTimeMillis();
-		logger.info("[>>>>>>>>>>] 药渡 not all dict, only increment  Start...");
+		logger.info("[>>>>>>>>>>] 药渡 not all dict, only increment. Start...");
 
 		// 获取数据库连接
-		DruidPooledConnection druidDataSourceConnection = getDruidDataSourceConnection(new DruidDataSource());
+		DruidPooledConnection DBConnection = getDruidDataSourceConnection(new DruidDataSource());
 
 		// 连接有效
-		if(null != druidDataSourceConnection){
+		if(null != DBConnection){
 			// 根据版本查询扩展词典
-			String selectVersionSql = "SELECT EXT_WORD WORD FROM ES_IK_EXT_WORD T WHERE T.VERSION >= " + version;
+			String selectVersionSql = "SELECT EXT_WORD WORD FROM ES_IK_EXT_WORD T WHERE T.VERSION > " + version;
+			logger.info("[>>>>>>>>>>] 药渡 select dict by version. SQL " + selectVersionSql);
 			try {
-				PreparedStatement preparedStatement = druidDataSourceConnection.prepareStatement(selectVersionSql);
+				PreparedStatement preparedStatement = DBConnection.prepareStatement(selectVersionSql);
 				ResultSet resultSet = preparedStatement.executeQuery();
 				List<String> words = new ArrayList<>();
 				while (resultSet.next()){
@@ -639,7 +637,7 @@ public class Dictionary {
 		}
 
 		// 释放连接
-		closeConnection(druidDataSourceConnection);
+		closeConnection(DBConnection);
 
 		logger.info("[>>>>>>>>>>] 药渡 not all dict, only increment. End... 耗时：" + (System.currentTimeMillis()-start) + " ms");
 	}
@@ -656,13 +654,30 @@ public class Dictionary {
 	private static Integer minEvictableIdleTimeMillis = 300000;
 
 	/**
-	 * druid 连接池 获取数据库连接
+	 * 获取数据库连接 JDBC
+	 * @return
+	 */
+	public static Connection getDataBaseConnection(){
+		Connection connection = null;
+		try {
+			// 高版本驱动可不填
+			Class.forName("com.mysql.jdbc.Driver");
+			connection= DriverManager.getConnection(url, username, password);
+		} catch (Exception e) {
+			logger.error("[>>>>>>>>>] 药渡 get db connection fail by jdbc", e);
+		}
+		return connection;
+	}
+
+	/**
+	 * druid 获取数据库连接
 	 * @param druidDataSource
 	 * @return
 	 */
 	public DruidPooledConnection getDruidDataSourceConnection(DruidDataSource druidDataSource){
 		DruidPooledConnection connection = null;
 		if(null == driver){
+			logger.error("[>>>>>>>>>>] 药渡 db driver is not null");
 			throw new IllegalStateException("[>>>>>>>>>>] 药渡 db driver is not null");
 		}
 		druidDataSource.setDriverClassName(driver);
@@ -679,7 +694,7 @@ public class Dictionary {
 		try {
 			connection = druidDataSource.getConnection();
 		} catch (SQLException e) {
-			logger.error("[>>>>>>>>>] 药渡 get db connection fail", e);
+			logger.error("[>>>>>>>>>] 药渡 get db connection fail by druid", e);
 		}
 		return connection;
 	}
