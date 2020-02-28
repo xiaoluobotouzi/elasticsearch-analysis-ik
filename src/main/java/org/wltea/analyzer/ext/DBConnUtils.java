@@ -30,6 +30,8 @@ public class DBConnUtils {
     public static Connection getDataBaseConnection(){
         Connection connection = null;
         try {
+            // 高版本驱动可忽略
+            Class.forName("com.mysql.jdbc.Driver");
             connection= DriverManager.getConnection(url, username, password);
         } catch (Exception e) {
             logger.error("[>>>>>>>>>] 药渡 get db connection fail", e);

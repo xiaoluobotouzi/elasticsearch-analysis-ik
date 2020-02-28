@@ -1,6 +1,5 @@
 package org.wltea.analyzer.ext;
 
-import com.alibaba.druid.pool.DruidDataSource;
 import com.alibaba.druid.pool.DruidPooledConnection;
 import org.apache.logging.log4j.Logger;
 import org.elasticsearch.SpecialPermission;
@@ -51,7 +50,7 @@ public class MonitorMysql implements Runnable {
         logger.info("[>>>>>>>>>>] 药渡 get hot dict version start");
         Dictionary singleton = Dictionary.getSingleton();
         // 获取数据库连接
-        DruidPooledConnection DBConnection = singleton.getDruidDataSourceConnection(new DruidDataSource());
+        DruidPooledConnection DBConnection = singleton.getDruidDataSourceConnection();
 
         // 连接有效
         if(null != DBConnection){
@@ -73,13 +72,6 @@ public class MonitorMysql implements Runnable {
                 }
             } catch (SQLException e) {
                 logger.error("[>>>>>>>>>>] 药渡 reLoad Hot Dict Error ", e);
-            } finally {
-                try {
-                    // 释放连接
-                    DBConnection.close();
-                } catch (SQLException e) {
-                    logger.error("[>>>>>>>>>>] 药渡 close db connection fail", e);
-                }
             }
         }
     }

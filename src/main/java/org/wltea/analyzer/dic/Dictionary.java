@@ -130,16 +130,30 @@ public class Dictionary {
 			}
 		}
 
+		// 初始化词典类时，读取配置文件，创建数据库连接
 		try {
 			Path file = PathUtils.get(getDictRoot(), "jdbc-reload.properties");
 			Properties propsDB = new Properties();
 			propsDB.load(new FileInputStream(file.toFile()));
 			if(null != propsDB){
 				logger.info("[>>>>>>>>>>] 药渡 read properties SUCCESS");
-				driver = propsDB.getProperty("driver");
-				url = propsDB.getProperty("url");
-				username = propsDB.getProperty("username");
-				password = propsDB.getProperty("password");
+				DruidDataSource druidDataSource = new DruidDataSource();
+				druidDataSource.setDriverClassName(propsDB.getProperty("driver"));
+				druidDataSource.setUrl(propsDB.getProperty("url"));
+				druidDataSource.setUsername(propsDB.getProperty("username"));
+				druidDataSource.setPassword(propsDB.getProperty("password"));
+				druidDataSource.setInitialSize(5);
+				druidDataSource.setMaxActive(20);
+				druidDataSource.setMinIdle(5);
+				druidDataSource.setMaxWait(10000);
+				druidDataSource.setTimeBetweenEvictionRunsMillis(50000);
+				druidDataSource.setMinEvictableIdleTimeMillis(30000);
+				druidDataSource.setValidationQuery("SELECT 1 FROM DUAL");
+				try {
+					connection = druidDataSource.getConnection();
+				} catch (SQLException e) {
+					logger.error("[>>>>>>>>>] 药渡 get db connection fail by druid", e);
+				}
 			}
 		} catch (IOException e) {
 			logger.error("[>>>>>>>>>>] 药渡 read properties fail", e);
@@ -155,7 +169,7 @@ public class Dictionary {
 	/**
 	 * 词典初始化 由于IK Analyzer的词典采用Dictionary类的静态方法进行词典初始化
 	 * 只有当Dictionary类被实际调用时，才会开始载入词典， 这将延长首次分词操作的时间 该方法提供了一个在应用加载阶段就初始化字典的手段
-	 * 
+	 *
 	 * @return Dictionary
 	 */
 	public static synchronized void initial(Configuration cfg) {
@@ -311,7 +325,7 @@ public class Dictionary {
 
 	/**
 	 * 获取词典单子实例
-	 * 
+	 *
 	 * @return Dictionary 单例对象
 	 */
 	public static Dictionary getSingleton() {
@@ -324,7 +338,7 @@ public class Dictionary {
 
 	/**
 	 * 批量加载新词条
-	 * 
+	 *
 	 * @param words
 	 *            Collection<String>词条列表
 	 */
@@ -355,7 +369,7 @@ public class Dictionary {
 
 	/**
 	 * 检索匹配主词典
-	 * 
+	 *
 	 * @return Hit 匹配结果描述
 	 */
 	public Hit matchInMainDict(char[] charArray) {
@@ -364,7 +378,7 @@ public class Dictionary {
 
 	/**
 	 * 检索匹配主词典
-	 * 
+	 *
 	 * @return Hit 匹配结果描述
 	 */
 	public Hit matchInMainDict(char[] charArray, int begin, int length) {
@@ -373,7 +387,7 @@ public class Dictionary {
 
 	/**
 	 * 检索匹配量词词典
-	 * 
+	 *
 	 * @return Hit 匹配结果描述
 	 */
 	public Hit matchInQuantifierDict(char[] charArray, int begin, int length) {
@@ -382,7 +396,7 @@ public class Dictionary {
 
 	/**
 	 * 从已匹配的Hit中直接取出DictSegment，继续向下匹配
-	 * 
+	 *
 	 * @return Hit
 	 */
 	public Hit matchWithHit(char[] charArray, int currentIndex, Hit matchedHit) {
@@ -392,7 +406,7 @@ public class Dictionary {
 
 	/**
 	 * 判断是否是停止词
-	 * 
+	 *
 	 * @return boolean
 	 */
 	public boolean isStopWord(char[] charArray, int begin, int length) {
@@ -503,7 +517,7 @@ public class Dictionary {
 						response.close();
 						return buffer;
 					}
-			}
+				}
 			}
 			response.close();
 		} catch (IllegalStateException | IOException e) {
@@ -608,7 +622,7 @@ public class Dictionary {
 		logger.info("[>>>>>>>>>>] 药渡 not all dict, only increment. Start...");
 
 		// 获取数据库连接
-		DruidPooledConnection DBConnection = getDruidDataSourceConnection(new DruidDataSource());
+		DruidPooledConnection DBConnection = getDruidDataSourceConnection();
 
 		// 连接有效
 		if(null != DBConnection){
@@ -633,88 +647,20 @@ public class Dictionary {
 				}
 			} catch (SQLException e) {
 				logger.error("[>>>>>>>>>>] 药渡 reLoad Hot Dict By Mysql Error ", e);
-			} finally {
-				try {
-					// 释放连接
-					DBConnection.close();
-				} catch (SQLException e) {
-					logger.error("[>>>>>>>>>>] 药渡 close db connection fail", e);
-				}
 			}
 		}
 
 		logger.info("[>>>>>>>>>>] 药渡 not all dict, only increment. End... 耗时：" + (System.currentTimeMillis()-start) + " ms");
 	}
 
-	private static String driver = null;
-	private static String url = null;
-	private static String username = null;
-	private static String password = null;
-	private static Integer initialSize = 5; // 初始化时建立物理连接的个数
-	private static Integer maxActive = 10; // 最大连接池数量
-	private static Integer minIdle = 5; // 最小连接池数量
-	private static Integer maxWait = 10000; // 获取连接时最大等待时间，单位毫秒
-	private static Integer timeBetweenEvictionRunsMillis = 50000; // 间隔1分钟检测需要关闭的空闲连接
-	private static Integer minEvictableIdleTimeMillis = 30000; // 连接保持空闲而不被驱逐的最小时间
+	private DruidPooledConnection connection = null;
 
 	/**
-	 * druid 获取数据库连接
-	 * @param druidDataSource
+	 * 获取数据库连接
 	 * @return
 	 */
-	public DruidPooledConnection getDruidDataSourceConnection(DruidDataSource druidDataSource){
-		DruidPooledConnection connection = null;
-		if(null == driver){
-			logger.error("[>>>>>>>>>>] 药渡 db driver is not null");
-			throw new IllegalStateException("[>>>>>>>>>>] 药渡 db driver is not null");
-		}
-		druidDataSource.setDriverClassName(driver);
-		druidDataSource.setUrl(url);
-		druidDataSource.setUsername(username);
-		druidDataSource.setPassword(password);
-		druidDataSource.setInitialSize(initialSize);
-		druidDataSource.setMaxActive(maxActive);
-		druidDataSource.setMinIdle(minIdle);
-		druidDataSource.setMaxWait(maxWait);
-		druidDataSource.setTimeBetweenEvictionRunsMillis(timeBetweenEvictionRunsMillis);
-		druidDataSource.setMinEvictableIdleTimeMillis(minEvictableIdleTimeMillis);
-		druidDataSource.setValidationQuery("SELECT 1 FROM DUAL");
-		try {
-			connection = druidDataSource.getConnection();
-		} catch (SQLException e) {
-			logger.error("[>>>>>>>>>] 药渡 get db connection fail by druid", e);
-		}
+	public DruidPooledConnection getDruidDataSourceConnection(){
 		return connection;
-	}
-
-	/**
-	 * 获取数据库连接 JDBC
-	 * @return
-	 */
-	public static Connection getDataBaseConnection(){
-		Connection connection = null;
-		try {
-			// 高版本驱动可不填
-			Class.forName("com.mysql.jdbc.Driver");
-			connection= DriverManager.getConnection(url, username, password);
-		} catch (Exception e) {
-			logger.error("[>>>>>>>>>] 药渡 get db connection fail by jdbc", e);
-		}
-		return connection;
-	}
-
-	/**
-	 * 关闭数据库连接
-	 * @param connection
-	 */
-	public void closeConnection(Connection connection){
-		if(null != connection){
-			try {
-				connection.close();
-			} catch (SQLException e) {
-				logger.error("[>>>>>>>>>>] 药渡 close db connection fail", e);
-			}
-		}
 	}
 
 }
