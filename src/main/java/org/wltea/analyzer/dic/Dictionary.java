@@ -634,8 +634,12 @@ public class Dictionary {
 			} catch (SQLException e) {
 				logger.error("[>>>>>>>>>>] 药渡 reLoad Hot Dict By Mysql Error ", e);
 			} finally {
-				// 释放连接
-				closeConnection(DBConnection);
+				try {
+					// 释放连接
+					DBConnection.close();
+				} catch (SQLException e) {
+					logger.error("[>>>>>>>>>>] 药渡 close db connection fail", e);
+				}
 			}
 		}
 
@@ -646,28 +650,12 @@ public class Dictionary {
 	private static String url = null;
 	private static String username = null;
 	private static String password = null;
-	private static Integer initialSize = 2;
-	private static Integer maxActive = 50;
-	private static Integer minIdle = 2;
-	private static Integer maxWait = 60000;
-	private static Integer timeBetweenEvictionRunsMillis = 60000;
-	private static Integer minEvictableIdleTimeMillis = 60000;
-
-	/**
-	 * 获取数据库连接 JDBC
-	 * @return
-	 */
-	public static Connection getDataBaseConnection(){
-		Connection connection = null;
-		try {
-			// 高版本驱动可不填
-			Class.forName("com.mysql.jdbc.Driver");
-			connection= DriverManager.getConnection(url, username, password);
-		} catch (Exception e) {
-			logger.error("[>>>>>>>>>] 药渡 get db connection fail by jdbc", e);
-		}
-		return connection;
-	}
+	private static Integer initialSize = 5; // 初始化时建立物理连接的个数
+	private static Integer maxActive = 10; // 最大连接池数量
+	private static Integer minIdle = 5; // 最小连接池数量
+	private static Integer maxWait = 10000; // 获取连接时最大等待时间，单位毫秒
+	private static Integer timeBetweenEvictionRunsMillis = 50000; // 间隔1分钟检测需要关闭的空闲连接
+	private static Integer minEvictableIdleTimeMillis = 30000; // 连接保持空闲而不被驱逐的最小时间
 
 	/**
 	 * druid 获取数据库连接
@@ -695,6 +683,22 @@ public class Dictionary {
 			connection = druidDataSource.getConnection();
 		} catch (SQLException e) {
 			logger.error("[>>>>>>>>>] 药渡 get db connection fail by druid", e);
+		}
+		return connection;
+	}
+
+	/**
+	 * 获取数据库连接 JDBC
+	 * @return
+	 */
+	public static Connection getDataBaseConnection(){
+		Connection connection = null;
+		try {
+			// 高版本驱动可不填
+			Class.forName("com.mysql.jdbc.Driver");
+			connection= DriverManager.getConnection(url, username, password);
+		} catch (Exception e) {
+			logger.error("[>>>>>>>>>] 药渡 get db connection fail by jdbc", e);
 		}
 		return connection;
 	}
