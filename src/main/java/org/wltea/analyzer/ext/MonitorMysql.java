@@ -35,8 +35,15 @@ public class MonitorMysql implements Runnable {
         logger.info("[>>>>>>>>>>>] 药渡 60s load hot dict from mysql End...");
     }
 
-    // 当前词典版本
-    private int currentVersion;
+    public MonitorMysql(int extWordMaxVersion, int stopWordMaxVersion){
+        this.currentExtWordVersion = extWordMaxVersion;
+        this.currentStopWordVersion = stopWordMaxVersion;
+    }
+
+    // 当前扩展词库版本
+    private int currentExtWordVersion;
+    // 当前扩展停用词库版本
+    private int currentStopWordVersion;
 
     /**
      * 监控流程：
@@ -47,31 +54,48 @@ public class MonitorMysql implements Runnable {
      *  ⑤休眠1min，返回第①步
      */
     public void runUnprivileged() {
-        logger.info("[>>>>>>>>>>] 药渡 get hot dict version start");
+        logger.info("[>>>>>>>>>>] 药渡 get dict version start");
         Dictionary singleton = Dictionary.getSingleton();
         // 获取数据库连接
         DruidPooledConnection DBConnection = singleton.getDruidDataSourceConnection();
 
         // 连接有效
         if(null != DBConnection){
-            // 查询版本表最大的版本
-            String selectVersionSql = "SELECT MAX(VERSION) VERSION FROM ES_IK_EXT_WORD_VER";
+            // 查询版本控制表，扩展词库版本和停用词库版本
+            String selectVersionSql = "SELECT MAX(WORD_VER) WORD_VER, MAX(STOP_WORD_VER) STOP_WORD_VER FROM ES_IK_EXT_WORD_VER";
             try {
                 PreparedStatement preparedStatement = DBConnection.prepareStatement(selectVersionSql);
                 ResultSet resultSet = preparedStatement.executeQuery();
-                int newVersion = 0;
+                int newWordVersion = 0;
+                int newStopWordVersion = 0;
                 while (resultSet.next()){
-                    newVersion = resultSet.getInt("VERSION");
+                    newWordVersion = resultSet.getInt("WORD_VER");
+                    newStopWordVersion = resultSet.getInt("STOP_WORD_VER");
                 }
-                logger.info("[>>>>>>>>>>] 药渡 reLoad Hot Dict Version. mysql version " + newVersion + ", current version " + currentVersion);
-                // 数据库新版本大于当前版本，更新词库
-                if(newVersion > currentVersion){
+
+                logger.info("[>>>>>>>>>>] 药渡 get extend word version. mysql version " + newWordVersion + ", current version " + currentExtWordVersion);
+
+                // 数据库版本大于当前版本，更新词库
+                if(newWordVersion > currentExtWordVersion){
                     // 增量词库，修改版本
-                    Dictionary.getSingleton().reLoadHotDictByMysql(newVersion);
-                    currentVersion = newVersion;
+                    boolean b = Dictionary.getSingleton().reLoadHotDictByMysql(currentExtWordVersion);
+                    if(b){
+                        currentExtWordVersion = newWordVersion;
+                    }
+                }
+
+                logger.info("[>>>>>>>>>>] 药渡 get stop word version. mysql version " + newStopWordVersion + ", current version " + currentStopWordVersion);
+
+                // 数据库版本大于当前版本，更新停用词库
+                if(newStopWordVersion > currentStopWordVersion){
+                    // 增量停用词库，修改版本
+                    boolean b = Dictionary.getSingleton().reLoadStopWordByMysql(currentStopWordVersion);
+                    if(b){
+                        currentStopWordVersion = newStopWordVersion;
+                    }
                 }
             } catch (SQLException e) {
-                logger.error("[>>>>>>>>>>] 药渡 reLoad Hot Dict Error ", e);
+                logger.error("[>>>>>>>>>>] 药渡 load dict Error ", e);
             }
         }
     }

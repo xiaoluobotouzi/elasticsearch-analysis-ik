@@ -199,7 +199,7 @@ public class Dictionary {
 					if(cfg.isEnableRemoteDictByMysql()){
 						logger.info("[>>>>>>>>>>] 药渡 new MonitorMysql");
 						// 初始延迟10秒, 间隔60秒执行一次
-						pool.scheduleAtFixedRate(new MonitorMysql(), 10, 60, TimeUnit.SECONDS);
+						pool.scheduleAtFixedRate(new MonitorMysql(extWordMaxVersion,stopWordMaxVersion), 10, 60, TimeUnit.SECONDS);
 					}
 
 				}
@@ -325,7 +325,7 @@ public class Dictionary {
 
 	/**
 	 * 获取词典单子实例
-	 *
+	 * 
 	 * @return Dictionary 单例对象
 	 */
 	public static Dictionary getSingleton() {
@@ -338,7 +338,7 @@ public class Dictionary {
 
 	/**
 	 * 批量加载新词条
-	 *
+	 * 
 	 * @param words
 	 *            Collection<String>词条列表
 	 */
@@ -369,7 +369,7 @@ public class Dictionary {
 
 	/**
 	 * 检索匹配主词典
-	 *
+	 * 
 	 * @return Hit 匹配结果描述
 	 */
 	public Hit matchInMainDict(char[] charArray) {
@@ -378,7 +378,7 @@ public class Dictionary {
 
 	/**
 	 * 检索匹配主词典
-	 *
+	 * 
 	 * @return Hit 匹配结果描述
 	 */
 	public Hit matchInMainDict(char[] charArray, int begin, int length) {
@@ -387,7 +387,7 @@ public class Dictionary {
 
 	/**
 	 * 检索匹配量词词典
-	 *
+	 * 
 	 * @return Hit 匹配结果描述
 	 */
 	public Hit matchInQuantifierDict(char[] charArray, int begin, int length) {
@@ -396,7 +396,7 @@ public class Dictionary {
 
 	/**
 	 * 从已匹配的Hit中直接取出DictSegment，继续向下匹配
-	 *
+	 * 
 	 * @return Hit
 	 */
 	public Hit matchWithHit(char[] charArray, int currentIndex, Hit matchedHit) {
@@ -406,7 +406,7 @@ public class Dictionary {
 
 	/**
 	 * 判断是否是停止词
-	 *
+	 * 
 	 * @return boolean
 	 */
 	public boolean isStopWord(char[] charArray, int begin, int length) {
@@ -427,8 +427,15 @@ public class Dictionary {
 		this.loadExtDict();
 		// 加载远程自定义词库
 		this.loadRemoteExtDict();
-		// 加载远程数据库自定义词库
-		this.reLoadHotDictByMysql(-1);
+
+		try {
+			// 加载远程数据库自定义词库
+			this.reLoadHotDictByMysql(0);
+			// 获取数据库最大词典版本
+			this.getMysqlMaxVersion();
+		} catch (SQLException e) {
+			logger.error("[>>>>>>>>>>] 药渡 init ext word fail. ", e);
+		}
 	}
 
 	/**
@@ -517,7 +524,7 @@ public class Dictionary {
 						response.close();
 						return buffer;
 					}
-				}
+			}
 			}
 			response.close();
 		} catch (IllegalStateException | IOException e) {
@@ -568,6 +575,12 @@ public class Dictionary {
 			}
 		}
 
+		try {
+			// 加载远程停用词典 By MySQL
+			reLoadStopWordByMysql(0);
+		} catch (SQLException e) {
+			logger.error("[>>>>>>>>>>] 药渡 init ext stop word fail. ", e);
+		}
 	}
 
 	/**
@@ -617,9 +630,11 @@ public class Dictionary {
 	 * TODO: 2020/2/26 注意编码格式 强烈要求 UTF-8
 	 * @param version
 	 */
-	public void reLoadHotDictByMysql(int version) {
+	public boolean reLoadHotDictByMysql(int version) throws SQLException {
 		long start = System.currentTimeMillis();
 		logger.info("[>>>>>>>>>>] 药渡 not all dict, only increment. Start...");
+
+		boolean isOK = false;
 
 		// 获取数据库连接
 		DruidPooledConnection DBConnection = getDruidDataSourceConnection();
@@ -627,30 +642,103 @@ public class Dictionary {
 		// 连接有效
 		if(null != DBConnection){
 			// 根据版本查询扩展词典
-			String selectVersionSql = "SELECT EXT_WORD WORD FROM ES_IK_EXT_WORD T WHERE T.VERSION > " + version;
-			logger.info("[>>>>>>>>>>] 药渡 select dict by version. SQL " + selectVersionSql);
-			try {
-				PreparedStatement preparedStatement = DBConnection.prepareStatement(selectVersionSql);
-				ResultSet resultSet = preparedStatement.executeQuery();
-				List<String> words = new ArrayList<>();
-				while (resultSet.next()){
-					String word = resultSet.getString("WORD");
-					words.add(word.trim());
-				}
-				// 遍历扩展词，新增到指定词典域
-				for (String word : words) {
-					if (word != null && !"".equals(word.trim())) {
-						// 加载扩展词典数据到主内存词典中
-						logger.info("[>>>>>>>>>>] 药渡 EXT_WORD：" + word);
-						_MainDict.fillSegment(word.trim().toLowerCase().toCharArray());
-					}
-				}
-			} catch (SQLException e) {
-				logger.error("[>>>>>>>>>>] 药渡 reLoad Hot Dict By Mysql Error ", e);
+			String selectWordSql = "SELECT EXT_WORD FROM ES_IK_EXT_WORD T WHERE T.VERSION > " + version;
+			logger.info("[>>>>>>>>>>] 药渡 select extend word by version. SQL " + selectWordSql);
+			PreparedStatement preparedStatement = DBConnection.prepareStatement(selectWordSql);
+			ResultSet resultSet = preparedStatement.executeQuery();
+			List<String> words = new ArrayList<>();
+			while (resultSet.next()){
+				String word = resultSet.getString("EXT_WORD");
+				words.add(word.trim());
 			}
+			// 遍历扩展词，新增到指定词典域
+			for (String word : words) {
+				if (word != null && !"".equals(word.trim())) {
+					// 加载扩展词典数据到主内存词典中
+					logger.info("[>>>>>>>>>>] 药渡 EXT_WORD：" + word);
+					_MainDict.fillSegment(word.trim().toLowerCase().toCharArray());
+				}
+			}
+
+
+
+
+			isOK = true;
+			return isOK;
 		}
 
 		logger.info("[>>>>>>>>>>] 药渡 not all dict, only increment. End... 耗时：" + (System.currentTimeMillis()-start) + " ms");
+		return isOK;
+	}
+
+	/**
+	 * 查询数据库停用词典 根据版本. 加载到停用词库
+	 * @param version
+	 */
+	public boolean reLoadStopWordByMysql(int version) throws SQLException {
+		long start = System.currentTimeMillis();
+		logger.info("[>>>>>>>>>>] 药渡 not all stop word, only increment. Start...");
+
+		boolean isOK = false;
+
+		// 获取数据库连接
+		DruidPooledConnection DBConnection = getDruidDataSourceConnection();
+
+		// 连接有效
+		if(null != DBConnection){
+			// 根据版本查询扩展词典
+			String selectStopWordSql = "SELECT STOP_WORD FROM ES_IK_STOP_WORD T WHERE T.VERSION > " + version;
+			logger.info("[>>>>>>>>>>] 药渡 select stop word by version. SQL " + selectStopWordSql);
+			PreparedStatement preparedStatement = DBConnection.prepareStatement(selectStopWordSql);
+			ResultSet resultSet = preparedStatement.executeQuery();
+			List<String> words = new ArrayList<>();
+			while (resultSet.next()){
+				String word = resultSet.getString("STOP_WORD");
+				words.add(word.trim());
+			}
+			// 遍历扩展停用词，新增到指定词典域
+			for (String word : words) {
+				if (word != null && !"".equals(word.trim())) {
+					// 加载扩展词典数据到主内存词典中
+					logger.info("[>>>>>>>>>>] 药渡 STOP_WORD：" + word);
+					_StopWords.fillSegment(word.trim().toLowerCase().toCharArray());
+				}
+			}
+			isOK = true;
+			return isOK;
+		}
+
+		logger.info("[>>>>>>>>>>] 药渡 not all stop word, only increment. End... 耗时：" + (System.currentTimeMillis()-start) + " ms");
+		return isOK;
+	}
+
+	private static int extWordMaxVersion = 0;
+	private static int stopWordMaxVersion = 0;
+
+	/**
+	 * 获取数据库最大词典版本
+	 */
+	private void getMysqlMaxVersion() {
+		logger.info("[>>>>>>>>>>] 药渡 get dict max version start");
+
+		// 获取数据库连接
+		DruidPooledConnection DBConnection = getDruidDataSourceConnection();
+
+		// 连接有效
+		if(null != DBConnection){
+			// 查询版本控制表，获取扩展词库和停用词库最大版本
+			String selectVersionSql = "SELECT MAX(WORD_VER) WORD_VER, MAX(STOP_WORD_VER) STOP_WORD_VER FROM ES_IK_EXT_WORD_VER";
+			try {
+				PreparedStatement preparedStatement = DBConnection.prepareStatement(selectVersionSql);
+				ResultSet resultSet = preparedStatement.executeQuery();
+				while (resultSet.next()){
+					extWordMaxVersion = resultSet.getInt("WORD_VER");
+					stopWordMaxVersion = resultSet.getInt("STOP_WORD_VER");
+				}
+			} catch (SQLException e) {
+				logger.error("[>>>>>>>>>>] 药渡 get dict max version Error ", e);
+			}
+		}
 	}
 
 	private DruidPooledConnection connection = null;
